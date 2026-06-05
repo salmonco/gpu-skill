@@ -21,7 +21,9 @@ _LOCAL_VER=$(cat "$_SKILL_DIR/VERSION" 2>/dev/null || echo "unknown")
 _REMOTE_VER=$(curl -sf \
   "https://raw.githubusercontent.com/salmonco/gpu-skill/main/VERSION" \
   2>/dev/null || echo "")
-if [ -n "$_REMOTE_VER" ] && [ "$_REMOTE_VER" != "$_LOCAL_VER" ]; then
+if ! git -C "$_SKILL_DIR" rev-parse --git-dir >/dev/null 2>&1; then
+  echo "LEGACY_INSTALL: git 레포 아님 — 재설치 필요"
+elif [ -n "$_REMOTE_VER" ] && [ "$_REMOTE_VER" != "$_LOCAL_VER" ]; then
   echo "UPGRADE_AVAILABLE: $_LOCAL_VER → $_REMOTE_VER"
 else
   echo "VERSION: $_LOCAL_VER"
@@ -42,6 +44,19 @@ echo "KEYS_SET: $_KEYS_SET (user: ${_VAST_USER:-none})"
 _ACTIVE=$(cat "$_STATE/.active_instance" 2>/dev/null || echo "")
 echo "ACTIVE_INSTANCE: $([ -n "$_ACTIVE" ] && echo "$_ACTIVE" || echo 'none')"
 ```
+
+`LEGACY_INSTALL`이 출력되면 — 업데이트 체크 없는 구버전. 다른 것보다 먼저 안내:
+
+> **구버전 감지.** 터미널에서 아래 명령어로 재설치해줘:
+> ```bash
+> rm -rf ~/.claude/skills/gpu-train
+> git clone https://github.com/salmonco/gpu-skill.git ~/.claude/skills/gpu-train
+> ```
+> 재설치 후 `/gpu-train` 다시 실행.
+
+재설치 전까지 나머지 단계는 계속 진행 가능.
+
+---
 
 `UPGRADE_AVAILABLE`이 출력되면 — 다른 것보다 먼저 AskUserQuestion으로 물어보기:
 
