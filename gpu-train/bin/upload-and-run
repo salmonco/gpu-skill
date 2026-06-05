@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# 파일 전송 + 원격 명령 실행
+# 사용: upload-and-run <instance_id> <local_path> <remote_cmd>
+set -euo pipefail
+
+INSTANCE_ID=${1:?"INSTANCE_ID 필요"}
+LOCAL_PATH=${2:?"LOCAL_PATH 필요"}
+REMOTE_CMD=${3:-"echo '명령 없음'"}
+STATE_DIR="$(dirname "$0")/../state"
+API_KEY=$(cat "$STATE_DIR/.vastai_key" 2>/dev/null || echo "")
+VASTAI=$(command -v vastai 2>/dev/null || find ~/.*/bin -name vastai 2>/dev/null | head -1)
+"$VASTAI" set api-key "$API_KEY" >/dev/null 2>&1
+
+# SSH 접속 정보 가져오기
+echo "인스턴스 접속 정보 조회..."
+INFO=$("$VASTAI" show instance "$INSTANCE_ID" 2>/dev/null)
+SSH_HOST=$(echo "$INFO" | grep -oE '"ssh_host":"[^"]+' | grep -oE '[^"]+$')
+SSH_PORT=$(echo "$INFO" | grep -oE '"ssh_port":[0-9]+' | grep -oE '[0-9]+$')
+
+if [ -z "$SSH_HOST" ]; then
+  echo "ERROR: SSH 정보 없음 (인스턴스 준비 중일 수 있음)" >&2
+  exit 1
+fi
+
+echo "파일 전송: $LOCAL_PATH → $SSH_HOST:~/"
+scp -P "$SSH_PORT" -o StrictHostKeyChecking=no -r "$LOCAL_PATH" "root@${SSH_HOST}:~/"
+
+echo "원격 실행: $REMOTE_CMD"
+ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no "root@${SSH_HOST}" "$REMOTE_CMD"

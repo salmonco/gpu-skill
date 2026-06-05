@@ -1,0 +1,29 @@
+#!/usr/bin/env bash
+# GPU 인스턴스 대여
+# 사용: rent-instance vast <offer_id> [disk_gb]
+set -euo pipefail
+
+PLATFORM=${1:-vast}
+OFFER_ID=${2:?"OFFER_ID 필요"}
+DISK_GB=${3:-40}
+STATE_DIR="$(dirname "$0")/../state"
+
+if [ "$PLATFORM" = "vast" ]; then
+  API_KEY=$(cat "$STATE_DIR/.vastai_key" 2>/dev/null || echo "")
+  VASTAI=$(command -v vastai 2>/dev/null || find ~/.*/bin -name vastai 2>/dev/null | head -1)
+  "$VASTAI" set api-key "$API_KEY" >/dev/null 2>&1
+
+  echo "인스턴스 생성 중 (offer=$OFFER_ID, disk=${DISK_GB}GB)..."
+  RESULT=$("$VASTAI" create instance "$OFFER_ID" \
+    --image pytorch/pytorch:2.5.0-cuda12.4-cudnn9-runtime \
+    --disk "$DISK_GB" \
+    2>&1)
+  echo "$RESULT"
+
+  # 인스턴스 ID 파싱 저장
+  INSTANCE_ID=$(echo "$RESULT" | grep -oE '"id":[0-9]+' | head -1 | grep -oE '[0-9]+' || echo "")
+  if [ -n "$INSTANCE_ID" ]; then
+    echo "${PLATFORM}:${INSTANCE_ID}" > "$STATE_DIR/.active_instance"
+    echo "✅ 인스턴스 저장: $INSTANCE_ID"
+  fi
+fi

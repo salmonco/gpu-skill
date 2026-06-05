@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Vast.ai에서 최저가 GPU 검색
+# 사용: search-vast <min_vram_gb> [max_price_per_hour]
+set -euo pipefail
+
+MIN_VRAM=${1:-16}
+MAX_PRICE=${2:-1.0}
+STATE_DIR="$(dirname "$0")/../state"
+API_KEY=$(cat "$STATE_DIR/.vastai_key" 2>/dev/null || echo "")
+
+if [ -z "$API_KEY" ]; then
+  echo "ERROR: Vast.ai API 키 없음 ($STATE_DIR/.vastai_key)" >&2
+  exit 1
+fi
+
+# vastai CLI 찾기 (venv or system)
+VASTAI=$(command -v vastai 2>/dev/null || find ~/.*/bin /usr/local/bin -name vastai 2>/dev/null | head -1 || echo "")
+if [ -z "$VASTAI" ]; then
+  echo "ERROR: vastai CLI 미설치. pip install vastai" >&2
+  exit 1
+fi
+
+"$VASTAI" set api-key "$API_KEY" >/dev/null 2>&1
+
+echo "=== Vast.ai GPU 검색 (VRAM>=${MIN_VRAM}GB, <\$${MAX_PRICE}/h) ==="
+"$VASTAI" search offers \
+  "gpu_ram>=${MIN_VRAM} reliability>0.95 dph_total<${MAX_PRICE} num_gpus=1" \
+  --order dph_total \
+  --limit 8 \
+  2>/dev/null || echo "결과 없음 또는 API 오류"

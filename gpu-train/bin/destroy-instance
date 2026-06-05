@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# 인스턴스 종료 (과금 중지)
+# 사용: destroy-instance [instance_id]
+set -euo pipefail
+
+STATE_DIR="$(dirname "$0")/../state"
+ACTIVE=$(cat "$STATE_DIR/.active_instance" 2>/dev/null || echo "")
+
+if [ -z "$ACTIVE" ] && [ -z "${1:-}" ]; then
+  echo "활성 인스턴스 없음"
+  exit 0
+fi
+
+RAW="${1:-$ACTIVE}"
+PLATFORM=$(echo "$RAW" | cut -d: -f1)
+INSTANCE_ID=$(echo "$RAW" | cut -d: -f2)
+
+if [ "$PLATFORM" = "vast" ]; then
+  API_KEY=$(cat "$STATE_DIR/.vastai_key" 2>/dev/null || echo "")
+  VASTAI=$(command -v vastai 2>/dev/null || find ~/.*/bin -name vastai 2>/dev/null | head -1)
+  "$VASTAI" set api-key "$API_KEY" >/dev/null 2>&1
+  echo "인스턴스 종료: $INSTANCE_ID"
+  "$VASTAI" destroy instance "$INSTANCE_ID"
+fi
+
+rm -f "$STATE_DIR/.active_instance"
+echo "✅ 종료 완료 — 과금 중지"
