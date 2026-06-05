@@ -27,6 +27,38 @@ fi
   2>/dev/null
 ```
 
+## 이력 교차 참조
+
+검색 결과를 반환하기 전, 과거 이력과 대조:
+
+```bash
+LEARNINGS=~/.claude/skills/gpu-train/state/learnings.jsonl
+if [ -f "$LEARNINGS" ]; then
+  python3 - <<PYEOF
+import json
+
+learnings = []
+with open("$LEARNINGS") as f:
+    for line in f:
+        learnings.append(json.loads(line.strip()))
+
+# GPU 이름별 성공/실패 집계
+history = {}
+for l in learnings:
+    gpu = l.get("gpu", "")
+    if gpu not in history:
+        history[gpu] = {"success": 0, "failed": 0}
+    history[gpu][l.get("result", "failed")] += 1
+
+for gpu, counts in history.items():
+    icon = "✅" if counts["success"] > counts["failed"] else "❌"
+    print(f"HISTORY {gpu}: {icon} 성공 {counts['success']}회 / 실패 {counts['failed']}회")
+PYEOF
+fi
+```
+
+offer 목록과 이력을 매칭해서 과거에 성공한 GPU 타입이 있으면 추천 우선순위에 반영.
+
 ## Output Format
 
 검색 결과를 아래 JSON으로 파싱해 반환:

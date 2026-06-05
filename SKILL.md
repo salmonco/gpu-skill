@@ -48,6 +48,21 @@ echo "KEYS_SET: $_KEYS_SET (user: ${_VAST_USER:-none})"
 # 활성 인스턴스 상태
 _ACTIVE=$(cat "$_STATE/.active_instance" 2>/dev/null || echo "")
 echo "ACTIVE_INSTANCE: $([ -n "$_ACTIVE" ] && echo "$_ACTIVE" || echo 'none')"
+
+# GPU 이력 (최근 5건)
+_LEARNINGS="$_STATE/learnings.jsonl"
+if [ -f "$_LEARNINGS" ] && [ -s "$_LEARNINGS" ]; then
+  echo "PAST_RUNS:"
+  tail -5 "$_LEARNINGS" | python3 -c "
+import sys, json
+for line in sys.stdin:
+    d = json.loads(line.strip())
+    icon = '✅' if d.get('result') == 'success' else '❌'
+    print(f\"  {icon} {d.get('date','')} {d.get('gpu','')} \${d.get('price_per_hour','?')}/h → {d.get('result','')} ({d.get('duration_min','?')}분) {d.get('notes','')}\")
+" 2>/dev/null
+else
+  echo "PAST_RUNS: none"
+fi
 ```
 
 `LEGACY_INSTALL`이 출력되면 — 업데이트 체크 없는 구버전. 다른 것보다 먼저 안내:
@@ -208,6 +223,11 @@ SSH_HOST=<from Step 3>
 SSH_PORT=<from Step 3>
 REMOTE_OUT=<결과 파일 경로>
 LOCAL_OUT=~/Downloads/
+GPU_NAME=<recommended_gpu from Step 1>
+PRICE_PER_HOUR=<recommended_price from Step 1>
+PROJECT=<project from Step 1>
+FILE=<recommended_file from Step 1>
+START_TIME=<Unix timestamp recorded at Step 3 start>
 ```
 
 ## Voice
