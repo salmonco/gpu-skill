@@ -16,6 +16,17 @@ _SKILL_DIR=~/.claude/skills/gpu-train
 _STATE="$_SKILL_DIR/state"
 mkdir -p "$_STATE"
 
+# 버전 체크
+_LOCAL_VER=$(cat "$_SKILL_DIR/VERSION" 2>/dev/null || echo "unknown")
+_REMOTE_VER=$(curl -sf \
+  "https://raw.githubusercontent.com/salmonco/gpu-skill/main/VERSION" \
+  2>/dev/null || echo "")
+if [ -n "$_REMOTE_VER" ] && [ "$_REMOTE_VER" != "$_LOCAL_VER" ]; then
+  echo "UPGRADE_AVAILABLE: $_LOCAL_VER → $_REMOTE_VER"
+else
+  echo "VERSION: $_LOCAL_VER"
+fi
+
 # vastai CLI 감지
 _VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
   || command -v vastai 2>/dev/null || echo "")
@@ -31,6 +42,28 @@ echo "KEYS_SET: $_KEYS_SET (user: ${_VAST_USER:-none})"
 _ACTIVE=$(cat "$_STATE/.active_instance" 2>/dev/null || echo "")
 echo "ACTIVE_INSTANCE: $([ -n "$_ACTIVE" ] && echo "$_ACTIVE" || echo 'none')"
 ```
+
+`UPGRADE_AVAILABLE`이 출력되면 — 다른 것보다 먼저 AskUserQuestion으로 물어보기:
+
+```
+AskUserQuestion({
+  questions: [{
+    question: "gpu-train v<new> 나왔어 (현재 v<old>). 업데이트할까?",
+    header: "업데이트",
+    options: [
+      { label: "지금 업데이트", description: "git pull로 최신 버전 설치 후 계속 진행" },
+      { label: "나중에", description: "현재 버전으로 계속 진행" }
+    ]
+  }]
+})
+```
+
+"지금 업데이트" 선택 시:
+```bash
+cd ~/.claude/skills/gpu-train && git pull origin main
+echo "✅ 업데이트 완료 — $(cat VERSION)"
+```
+업데이트 후 preamble 재실행.
 
 ## Step 0: 활성 인스턴스 처리 [GATE]
 
