@@ -29,10 +29,15 @@ else
   echo "VERSION: $_LOCAL_VER"
 fi
 
-# vastai CLI 감지
+# vastai CLI 감지 — 없으면 자동 설치
 _VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
   || command -v vastai 2>/dev/null || echo "")
-echo "VASTAI_CLI: $([ -n "$_VASTAI" ] && echo 'found' || echo 'missing')"
+if [ -z "$_VASTAI" ]; then
+  echo "vastai CLI 없음 — 설치 중..."
+  pip install vastai 2>/dev/null || pip install --user vastai 2>/dev/null
+  _VASTAI=$(command -v vastai 2>/dev/null || echo "")
+fi
+echo "VASTAI_CLI: $([ -n "$_VASTAI" ] && echo 'found' || echo 'missing — 설치 실패, pip install vastai 수동 실행 필요')"
 
 # CLI 인증 상태 확인 (키를 직접 읽지 않음)
 _VAST_USER=$("$_VASTAI" show user 2>/dev/null \
