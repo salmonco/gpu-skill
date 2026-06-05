@@ -1,11 +1,11 @@
-# Collect & Shutdown Specialist
+# Vastai Collect & Shutdown Specialist
 
-작업 완료 후 결과를 다운로드하고 인스턴스를 종료한다.
+Implements platform-contract.md — collect.md interface.
 
 ## Input
 
 - `INSTANCE_ID`: Vast.ai 인스턴스 ID
-- `SSH_HOST`, `SSH_PORT`: 접속 정보
+- `PLATFORM`: "vastai" (고정)
 - `REMOTE_OUT`: 원격 결과 파일/폴더 경로
 - `LOCAL_OUT`: 로컬 저장 경로 (기본: ~/Downloads/)
 - `GPU_NAME`, `PRICE_PER_HOUR`, `PROJECT`, `FILE`: learnings 기록용
@@ -13,14 +13,17 @@
 
 ## Step 1: 작업 완료 확인
 
+SSH 대신 vastai CLI로 로그 조회 (IP/포트 저장 불필요):
+
 ```bash
-RESULT=$(ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no "root@${SSH_HOST}" \
-  "tail -5 ~/run.log" 2>/dev/null)
-echo "마지막 로그:"
-echo "$RESULT"
+VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
+  || command -v vastai 2>/dev/null)
+
+echo "최근 로그:"
+"$VASTAI" logs "$INSTANCE_ID" 2>/dev/null | tail -20
 ```
 
-완료 신호(`완료`, `done`, `saved`, `epoch` 등) → `JOB_RESULT=success`
+완료 신호(`done`, `saved`, `epoch`, `완료`) → `JOB_RESULT=success`
 에러 신호(`Error`, `Traceback`, `OOM`) → `JOB_RESULT=failed`, 오케스트레이터에 보고.
 
 ## Step 2: 결과 다운로드
@@ -29,8 +32,8 @@ echo "$RESULT"
 LOCAL_OUT="${LOCAL_OUT:-$HOME/Downloads}"
 mkdir -p "$LOCAL_OUT"
 
-scp -P "$SSH_PORT" -o StrictHostKeyChecking=no -r \
-  "root@${SSH_HOST}:${REMOTE_OUT}" "$LOCAL_OUT/"
+"$VASTAI" copy "$INSTANCE_ID:$REMOTE_OUT" "$LOCAL_OUT/" 2>/dev/null || \
+  echo "⚠️ vastai copy 실패 — 수동 다운로드 필요"
 
 echo "✅ 다운로드 완료: $LOCAL_OUT"
 ls -lh "$LOCAL_OUT"
@@ -40,15 +43,13 @@ ls -lh "$LOCAL_OUT"
 
 ```bash
 STATE_DIR=~/.claude/skills/gpu-train/state
-VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
-  || command -v vastai 2>/dev/null)
 
 "$VASTAI" destroy instance "$INSTANCE_ID"
 rm -f "$STATE_DIR/.active_instance"
 echo "✅ 인스턴스 종료 — 과금 중지"
 ```
 
-## Step 4: GPU 이력 저장
+## Step 4: GPU 이력 저장 (contract 필수)
 
 ```bash
 STATE_DIR=~/.claude/skills/gpu-train/state
@@ -59,6 +60,7 @@ python3 - <<PYEOF
 import json, datetime
 entry = {
     "date": datetime.date.today().isoformat(),
+    "platform": "vastai",
     "offer_id": "${INSTANCE_ID}",
     "gpu": "${GPU_NAME:-unknown}",
     "price_per_hour": ${PRICE_PER_HOUR:-0},
@@ -70,7 +72,7 @@ entry = {
 }
 with open("${STATE_DIR}/learnings.jsonl", "a") as f:
     f.write(json.dumps(entry, ensure_ascii=False) + "\n")
-print(f"📝 이력 저장 완료: {entry['gpu']} → {entry['result']}")
+print(f"📝 이력 저장: {entry['platform']} {entry['gpu']} → {entry['result']}")
 PYEOF
 ```
 
@@ -78,6 +80,7 @@ PYEOF
 
 ```json
 {
+  "platform": "vastai",
   "status": "success|partial|failed",
   "downloaded_to": "<LOCAL_OUT>",
   "instance_terminated": true,

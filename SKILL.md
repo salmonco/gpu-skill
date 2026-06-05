@@ -29,7 +29,8 @@ else
   echo "VERSION: $_LOCAL_VER"
 fi
 
-# vastai CLI 감지 — 없으면 자동 설치
+# 플랫폼별 CLI 감지 + 인증 상태
+# vastai
 _VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
   || command -v vastai 2>/dev/null || echo "")
 if [ -z "$_VASTAI" ]; then
@@ -37,13 +38,20 @@ if [ -z "$_VASTAI" ]; then
   pip install vastai 2>/dev/null || pip install --user vastai 2>/dev/null
   _VASTAI=$(command -v vastai 2>/dev/null || echo "")
 fi
-echo "VASTAI_CLI: $([ -n "$_VASTAI" ] && echo 'found' || echo 'missing — 설치 실패, pip install vastai 수동 실행 필요')"
-
-# CLI 인증 상태 확인 (키를 직접 읽지 않음)
 _VAST_USER=$("$_VASTAI" show user 2>/dev/null \
   | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('username',''))" 2>/dev/null || echo "")
-_KEYS_SET="no"; [ -n "$_VAST_USER" ] && _KEYS_SET="yes"
-echo "KEYS_SET: $_KEYS_SET (user: ${_VAST_USER:-none})"
+echo "PLATFORM vastai: $([ -n "$_VAST_USER" ] && echo "auth=yes user=$_VAST_USER" || echo 'auth=no')"
+
+# runpod (설치/인증 있으면)
+_RUNPOD=$(command -v runpodctl 2>/dev/null || echo "")
+_RUNPOD_OK=$([ -n "$_RUNPOD" ] && "$_RUNPOD" get pods 2>/dev/null && echo "yes" || echo "no")
+echo "PLATFORM runpod: $([ "$_RUNPOD_OK" = "yes" ] && echo 'auth=yes' || echo 'not-installed')"
+
+# 사용 가능한 플랫폼 요약
+_PLATFORMS=""
+[ -n "$_VAST_USER" ] && _PLATFORMS="vastai"
+[ "$_RUNPOD_OK" = "yes" ] && _PLATFORMS="$_PLATFORMS runpod"
+echo "AVAILABLE_PLATFORMS: ${_PLATFORMS:-none}"
 
 # 활성 인스턴스 상태
 _ACTIVE=$(cat "$_STATE/.active_instance" 2>/dev/null || echo "")
@@ -131,14 +139,17 @@ Return only the JSON output specified in that file.
 Working directory: <current pwd>
 ```
 
-**Agent B — 가격 검색** (`subagent_type: "general-purpose"`):
+**Agent B — 가격 검색** (인증된 플랫폼 수만큼 병렬 실행):
+
+각 `AVAILABLE_PLATFORMS`의 플랫폼마다 에이전트 하나씩:
 ```
-Read ~/.claude/skills/gpu-train/specialists/prices.md and follow it exactly.
-MIN_VRAM_GB=16  (project agent 결과 나오기 전이므로 보수적으로 16 사용)
+Read ~/.claude/skills/gpu-train/specialists/<platform>/prices.md and follow it exactly.
+MIN_VRAM_GB=16
 Return only the JSON output specified in that file.
 ```
 
-가격 검색은 인증 불필요 — KEYS_SET 무관하게 항상 실행.
+예: `vastai`만 인증됐으면 에이전트 1개, `vastai + runpod`이면 2개 동시 실행.
+결과를 `platform` 필드 기준으로 병합 후 전체 최저가 선택.
 
 두 에이전트 완료 후 결과 합산:
 
@@ -166,40 +177,38 @@ AskUserQuestion({
 })
 ```
 
-## Step 2: Vast.ai 인증 안내 [GATE: KEYS_SET=no, 대여 직전]
+## Step 2: 플랫폼 인증 안내 [GATE: AVAILABLE_PLATFORMS=none, 대여 직전]
 
-`KEYS_SET`이 `no`일 때만 실행. `yes`면 완전히 스킵.
-가격 검색(Step 1)은 인증 없이 항상 실행되므로, 이 단계는 유저가 "추천대로 진행"을 선택한 후에만 진행.
+`AVAILABLE_PLATFORMS`가 `none`일 때만 실행. 인증된 플랫폼이 하나라도 있으면 완전히 스킵.
 
-아래 안내 후 AskUserQuestion으로 확인:
-
-> **Vast.ai 인증 필요.** 터미널에서 직접 실행해줘 (키가 나를 거치지 않아):
-> ```bash
-> vastai set api-key <YOUR_API_KEY>
-> ```
-> API 키는 [vast.ai → 우상단 아이콘 → Account → API Key]에서 복사.
+> **플랫폼 인증 필요.** 터미널에서 직접 실행해줘 (키가 나를 거치지 않아):
+>
+> **Vast.ai**: `vastai set api-key <KEY>` ([vast.ai → Account → API Key])
+> **RunPod**: `runpodctl config --apiKey <KEY>` ([runpod.io → Settings → API Keys])
 
 ```
 AskUserQuestion({
   questions: [{
-    question: "터미널에서 `vastai set api-key KEY` 실행했어?",
-    header: "Vast.ai 인증",
+    question: "어느 플랫폼에 인증할 거야?",
+    header: "플랫폼 선택",
     options: [
-      { label: "완료", description: "인증 확인 후 가격 검색 진행" },
-      { label: "계정이 없어", description: "vast.ai 가입 링크 안내" },
+      { label: "Vast.ai", description: "vastai set api-key KEY 실행 후 완료 알려줘" },
+      { label: "RunPod", description: "runpodctl config --apiKey KEY 실행 후 완료 알려줘" },
       { label: "나중에 할게", description: "여기서 중단" }
     ]
   }]
 })
 ```
 
-"완료" 선택 시 → preamble 재실행해서 인증 확인 후 Agent B(가격 검색) 실행.
+완료 알리면 → preamble 재실행해서 인증 확인.
 
 ## Step 3: 대여 + 실행 에이전트 [승인 후]
 
 **Agent C — 대여 & 실행** (`subagent_type: "general-purpose"`):
+
+선택된 offer의 `platform` 필드로 라우팅:
 ```
-Read ~/.claude/skills/gpu-train/specialists/rent.md and follow it exactly.
+Read ~/.claude/skills/gpu-train/specialists/<platform>/rent.md and follow it exactly.
 OFFER_ID=<recommended_id from Step 1>
 LOCAL_FILE=<recommended_file from Step 1>
 REMOTE_CMD=<실행 명령어 — 사용자 확인 또는 기본값>
@@ -216,8 +225,10 @@ REMOTE_CMD=<실행 명령어 — 사용자 확인 또는 기본값>
 작업 완료 신호 감지(로그 모니터링) 후:
 
 **Agent D — 결과 회수 & 종료** (`subagent_type: "general-purpose"`):
+
+`state/.active_instance`의 `<platform>:` 프리픽스로 라우팅:
 ```
-Read ~/.claude/skills/gpu-train/specialists/collect.md and follow it exactly.
+Read ~/.claude/skills/gpu-train/specialists/<platform>/collect.md and follow it exactly.
 INSTANCE_ID=<from Step 3>
 SSH_HOST=<from Step 3>
 SSH_PORT=<from Step 3>
@@ -244,10 +255,10 @@ START_TIME=<Unix timestamp recorded at Step 3 start>
 
 | 조건 | 스킵 |
 |------|------|
-| KEYS_SET=yes | Step 2 완전 스킵 |
-| KEYS_SET=no | Step 1(가격 검색) 정상 실행, Step 2는 대여 선택 시에만 |
+| AVAILABLE_PLATFORMS≠none | Step 2 완전 스킵 |
+| AVAILABLE_PLATFORMS=none | Step 1(가격 검색) 스킵, Step 2에서 인증 안내 |
 | ACTIVE_INSTANCE≠none | AskUserQuestion으로 처리 방법 결정 |
-| VASTAI_CLI=missing | 설치 안내 후 중단 |
+| `<platform>:` 프리픽스 | Step 3/4에서 플랫폼별 specialist 자동 라우팅 |
 
 ## Completion Status
 

@@ -1,6 +1,6 @@
-# Price Search Specialist
+# Vastai Price Search Specialist
 
-Vast.ai에서 실시간 GPU 가격을 검색해 최저가 목록을 반환한다.
+Implements platform-contract.md — prices.md interface.
 가격 검색은 인증 불필요 — API 키 없이도 동작.
 
 ## Input
@@ -65,21 +65,21 @@ offer 목록과 이력을 매칭해서 과거에 성공한 GPU 타입이 있으�
 
 ```json
 {
+  "platform": "vastai",
   "offers": [
     {
-      "rank": 1,
       "id": "<offer_id>",
       "gpu": "<gpu_name>",
-      "vram_gb": <vram>,
-      "price_per_hour": <price>,
-      "reliability": <0~1>,
-      "location": "<country>"
+      "vram_gb": 24,
+      "price_per_hour": 0.29,
+      "reliability": 0.99,
+      "location": "US"
     }
   ],
-  "recommended_id": "<가장 저렴하고 신뢰도 높은 offer_id>",
+  "recommended_id": "<offer_id>",
   "recommended_gpu": "<gpu_name>",
-  "recommended_price": <price>
+  "recommended_price": 0.29
 }
 ```
 
-검색 실패 시: `{"error": "<이유>", "offers": []}`
+검색 실패 시: `{"platform": "vastai", "error": "<이유>", "offers": []}`

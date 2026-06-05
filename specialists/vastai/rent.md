@@ -12,19 +12,18 @@
 
 ```bash
 STATE_DIR=~/.claude/skills/gpu-train/state
-VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1)
-API_KEY=$(cat "$STATE_DIR/.vastai_key")
-"$VASTAI" set api-key "$API_KEY" >/dev/null 2>&1
+VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
+  || command -v vastai 2>/dev/null)
 
 RESULT=$("$VASTAI" create instance "$OFFER_ID" \
   --image pytorch/pytorch:2.5.0-cuda12.4-cudnn9-runtime \
   --disk 40 2>&1)
 echo "$RESULT"
 
-# 인스턴스 ID 저장
+# 인스턴스 ID 저장 (platform: 프리픽스 포함 — contract 준수)
 INSTANCE_ID=$(echo "$RESULT" | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('new_contract',''))" 2>/dev/null || \
               echo "$RESULT" | grep -oE '"id":[0-9]+' | head -1 | grep -oE '[0-9]+')
-echo "vast:$INSTANCE_ID" > "$STATE_DIR/.active_instance"
+echo "vastai:$INSTANCE_ID" > "$STATE_DIR/.active_instance"
 echo "INSTANCE_ID: $INSTANCE_ID"
 ```
 
@@ -62,9 +61,8 @@ echo "HOST: $SSH_HOST  PORT: $SSH_PORT  INSTANCE: $INSTANCE_ID"
 
 ```json
 {
+  "platform": "vastai",
   "instance_id": "<ID>",
-  "ssh_host": "<host>",
-  "ssh_port": <port>,
   "status": "running|failed",
   "log_path": "~/run.log"
 }
