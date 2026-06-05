@@ -16,25 +16,41 @@ _SKILL_DIR=~/.claude/skills/gpu-train
 _STATE="$_SKILL_DIR/state"
 mkdir -p "$_STATE"
 
-# 상태 감지
-_VAST_KEY=$(cat "$_STATE/.vastai_key" 2>/dev/null || echo "")
-_KEYS_SET="no"; [ -n "$_VAST_KEY" ] && _KEYS_SET="yes"
-echo "KEYS_SET: $_KEYS_SET"
-
-_ACTIVE=$(cat "$_STATE/.active_instance" 2>/dev/null || echo "")
-echo "ACTIVE_INSTANCE: $([ -n "$_ACTIVE" ] && echo "$_ACTIVE" || echo 'none')"
-
+# vastai CLI 감지
 _VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
   || command -v vastai 2>/dev/null || echo "")
 echo "VASTAI_CLI: $([ -n "$_VASTAI" ] && echo 'found' || echo 'missing')"
+
+# CLI 인증 상태 확인 (키를 직접 읽지 않음)
+_VAST_USER=$("$_VASTAI" show user 2>/dev/null \
+  | python3 -c "import sys,json; d=json.load(sys.stdin); print(d.get('username',''))" 2>/dev/null || echo "")
+_KEYS_SET="no"; [ -n "$_VAST_USER" ] && _KEYS_SET="yes"
+echo "KEYS_SET: $_KEYS_SET (user: ${_VAST_USER:-none})"
+
+# 활성 인스턴스 상태
+_ACTIVE=$(cat "$_STATE/.active_instance" 2>/dev/null || echo "")
+echo "ACTIVE_INSTANCE: $([ -n "$_ACTIVE" ] && echo "$_ACTIVE" || echo 'none')"
 ```
 
 ## Step 0: 활성 인스턴스 처리 [GATE]
 
-`ACTIVE_INSTANCE`가 `none`이 아니면 — 새 작업 시작 전에 먼저 보고:
-"현재 실행 중인 인스턴스: `<ID>`. 결과 회수 + 종료할까, 아니면 상태만 확인할까?"
+`ACTIVE_INSTANCE`가 `none`이 아니면 — 새 작업 시작 전에 AskUserQuestion으로 물어보기:
 
-종료 원하면 → Step 4(collect)로 건너뜀.
+```
+AskUserQuestion({
+  questions: [{
+    question: "현재 실행 중인 인스턴스가 있어: <ID>. 어떻게 할까?",
+    header: "활성 인스턴스",
+    options: [
+      { label: "결과 회수 + 종료", description: "결과 다운로드 후 인스턴스 삭제 (과금 중지)" },
+      { label: "상태만 확인", description: "로그 확인 후 계속 실행" },
+      { label: "무시하고 새 작업", description: "현재 인스턴스는 그대로 두고 새 작업 시작" }
+    ]
+  }]
+})
+```
+
+"결과 회수 + 종료" 선택 → Step 4로 건너뜀.
 
 ## Step 1: 병렬 에이전트 — 프로젝트 분석 + 가격 검색
 
@@ -47,14 +63,14 @@ Return only the JSON output specified in that file.
 Working directory: <current pwd>
 ```
 
-**Agent B — 가격 검색** (`subagent_type: "general-purpose"`, `KEYS_SET=yes`일 때만):
+**Agent B — 가격 검색** (`subagent_type: "general-purpose"`):
 ```
 Read ~/.claude/skills/gpu-train/specialists/prices.md and follow it exactly.
 MIN_VRAM_GB=16  (project agent 결과 나오기 전이므로 보수적으로 16 사용)
 Return only the JSON output specified in that file.
 ```
 
-`KEYS_SET=no`이면 Agent B 스킵 → Step 2(API 키 설정) 먼저.
+가격 검색은 인증 불필요 — KEYS_SET 무관하게 항상 실행.
 
 두 에이전트 완료 후 결과 합산:
 
@@ -63,30 +79,53 @@ Return only the JSON output specified in that file.
 🤖 모델: <model> | 💾 필요 VRAM: <vram_gb>GB
 📦 추천 파일: <recommended_file>
 💰 최저가: <recommended_gpu> $<recommended_price>/h (offer: <recommended_id>)
-→ 예상 비용: $<price>/h × ~30분 = ~$<price*0.5>
+→ 예상 비용: $<price>/h × ~30분 = ~$<estimated_cost>
 ```
 
-**한 번에 물어:**
+그리고 AskUserQuestion으로 한 번에 물어보기:
 
-Options:
-- A) 추천대로 진행
-- B) 다른 파일/명령어 지정
-- C) 가격 목록 전체 보기
-
-## Step 2: API 키 설정 [GATE: KEYS_SET=no]
-
-`KEYS_SET`이 `no`일 때만 실행. 이미 `yes`면 완전히 스킵.
-
-> Vast.ai API 키 필요. [vast.ai → 우상단 아이콘 → API Key]에서 복사해줘.
-
-받으면:
-```bash
-echo "<KEY>" > ~/.claude/skills/gpu-train/state/.vastai_key
-chmod 600 ~/.claude/skills/gpu-train/state/.vastai_key
-echo "✅ 저장 완료"
+```
+AskUserQuestion({
+  questions: [{
+    question: "어떻게 진행할까?",
+    header: "다음 단계",
+    options: [
+      { label: "추천대로 진행", description: "<recommended_gpu> $<price>/h — 바로 대여 시작" },
+      { label: "파일/명령어 변경", description: "다른 파일 선택 또는 커스텀 실행 명령어 입력" },
+      { label: "가격 목록 전체 보기", description: "상위 6개 GPU 옵션 비교" }
+    ]
+  }]
+})
 ```
 
-→ Step 1의 Agent B(가격 검색)를 이제 실행.
+## Step 2: Vast.ai 인증 안내 [GATE: KEYS_SET=no, 대여 직전]
+
+`KEYS_SET`이 `no`일 때만 실행. `yes`면 완전히 스킵.
+가격 검색(Step 1)은 인증 없이 항상 실행되므로, 이 단계는 유저가 "추천대로 진행"을 선택한 후에만 진행.
+
+아래 안내 후 AskUserQuestion으로 확인:
+
+> **Vast.ai 인증 필요.** 터미널에서 직접 실행해줘 (키가 나를 거치지 않아):
+> ```bash
+> vastai set api-key <YOUR_API_KEY>
+> ```
+> API 키는 [vast.ai → 우상단 아이콘 → Account → API Key]에서 복사.
+
+```
+AskUserQuestion({
+  questions: [{
+    question: "터미널에서 `vastai set api-key KEY` 실행했어?",
+    header: "Vast.ai 인증",
+    options: [
+      { label: "완료", description: "인증 확인 후 가격 검색 진행" },
+      { label: "계정이 없어", description: "vast.ai 가입 링크 안내" },
+      { label: "나중에 할게", description: "여기서 중단" }
+    ]
+  }]
+})
+```
+
+"완료" 선택 시 → preamble 재실행해서 인증 확인 후 Agent B(가격 검색) 실행.
 
 ## Step 3: 대여 + 실행 에이전트 [승인 후]
 
@@ -126,18 +165,19 @@ LOCAL_OUT=~/Downloads/
 
 - 대여 전 **반드시 예상 비용 + 승인** — 자동 대여 절대 없음
 - 완료/실패 어느 경우든 인스턴스 종료 안내
-- API 키 `state/`에만 저장 (git 제외)
+- API 키는 `vastai set api-key`로만 저장 — 스킬이 키를 직접 읽거나 저장하지 않음
 
 ## Adaptive Gating
 
 | 조건 | 스킵 |
 |------|------|
 | KEYS_SET=yes | Step 2 완전 스킵 |
-| ACTIVE_INSTANCE≠none | Step 1~3 스킵, Step 4로 바로 |
+| KEYS_SET=no | Step 1(가격 검색) 정상 실행, Step 2는 대여 선택 시에만 |
+| ACTIVE_INSTANCE≠none | AskUserQuestion으로 처리 방법 결정 |
 | VASTAI_CLI=missing | 설치 안내 후 중단 |
 
 ## Completion Status
 
 - **DONE**: 결과 다운로드 + 인스턴스 종료 확인
 - **DONE_WITH_CONCERNS**: 완료했으나 일부 파일 누락
-- **BLOCKED**: API 키 없음 / SSH 접속 불가 / 잔액 부족
+- **BLOCKED**: 인증 실패 / SSH 접속 불가 / 잔액 부족

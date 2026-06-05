@@ -1,6 +1,7 @@
 # Price Search Specialist
 
 Vast.ai에서 실시간 GPU 가격을 검색해 최저가 목록을 반환한다.
+가격 검색은 인증 불필요 — API 키 없이도 동작.
 
 ## Input
 
@@ -13,17 +14,12 @@ Vast.ai에서 실시간 GPU 가격을 검색해 최저가 목록을 반환한다
 VASTAI=$(find "$HOME" -name vastai -path "*/bin/vastai" 2>/dev/null | head -1 \
   || command -v vastai 2>/dev/null || echo "")
 
-STATE_DIR=~/.claude/skills/gpu-train/state
-API_KEY=$(cat "$STATE_DIR/.vastai_key" 2>/dev/null || echo "")
-
-if [ -z "$VASTAI" ] || [ -z "$API_KEY" ]; then
-  echo '{"error": "vastai CLI 없음 또는 API 키 없음"}'
+if [ -z "$VASTAI" ]; then
+  echo '{"error": "vastai CLI 없음 — pip install vastai 로 설치"}'
   exit 0
 fi
 
-"$VASTAI" set api-key "$API_KEY" >/dev/null 2>&1
-
-# 검색: 신뢰도 높고 저렴한 순
+# 검색: 인증 불필요, 신뢰도 높고 저렴한 순
 "$VASTAI" search offers \
   "gpu_ram>=${MIN_VRAM_GB:-16} reliability>0.97 dph_total<${MAX_PRICE:-2.0} num_gpus=1 inet_up>200" \
   --order dph_total \
